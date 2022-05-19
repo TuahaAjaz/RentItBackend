@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const mysql = require('mysql');
 const bcrypt = require('bcrypt');
 const res = require('express/lib/response');
+const cors = require('cors');
 require('dotenv').config();
 const cloudinary = require('cloudinary').v2;
 
@@ -24,60 +25,13 @@ const db = mysql.createConnection({
 
 app.use(bodyParser.json({ limit: '50mb' }));
 
+app.use(cors());
+
 app.listen(3001, () => {
     console.log("Local host running at port 3001");
 });
 
 const saltRounds = 10;
-
-function signup (sqlQuery1, sqlQuery2, fname, lname, email, contact, hash, res) {
-    db.beginTransaction((error) => {
-        if(error) {
-            console.log(error);
-            console.log("Bad Request");
-        }
-        db.query(sqlQuery2,[email, hash] ,(error, Data) => {
-            try {
-                if(error) {
-                    db.rollback(() => {
-                        throw error;
-                    })
-                }
-                console.log("Insert1 Successfull");
-            }
-            catch {
-                console.log("Insert Unsuccessful");
-                console.log(error);
-            }
-            db.query(sqlQuery1,[fname, lname, email, contact] ,(error) => {
-                try {
-                    if(error) {
-                        db.rollback(() => {
-                            throw error;
-                        })
-                    }
-                    console.log("Insert2 Successfull");
-                }
-                catch {
-                    console.log("Insert Unsuccessful");
-                    console.log(error);
-                }
-                db.commit((error) => {
-                    if(error) {
-                        db.rollback(() => {
-                            console.log(error);
-                            console.log("Bad Request");
-                        })
-                    }
-                    console.log("Success");
-                    console.log("Successful!");
-                    db.end();
-                    res.status(200).json("Successfull Transaction");
-                })
-            })    
-        })
-    })
-}
 
 function signin (sqlQuery1, sqlQuery2, email, password, res) {
     db.query(sqlQuery1, [email], (error, Data) => {
@@ -96,15 +50,16 @@ function signin (sqlQuery1, sqlQuery2, email, password, res) {
                         })
                     }
                     else {
-                        throw error;
+                        res.json({});
                     }
-                });
+                })
             }
             else {
-                res.status(400).json("Email or Password Incorrect");
+                throw error;
             }
         }
         catch {
+            res.json({});
             console.error(error);
         }
     })
@@ -124,13 +79,58 @@ app.post('/customers/signup', (req, res) => {
         if(error) {
             throw error;
         }
-        signup(sqlQuery1, sqlQuery2, fname, lname, email, contact, hash, res);
+        db.beginTransaction((error) => {
+            if(error) {
+                console.log(error);
+                console.log("Bad Request");
+            }
+            db.query(sqlQuery2,[email, hash] ,(error, Data) => {
+                try {
+                    if(error) {
+                        db.rollback(() => {
+                            throw error;
+                        })
+                    }
+                    console.log("Insert1 Successfull");
+                }
+                catch {
+                    console.log("Insert Unsuccessful");
+                    console.log(error);
+                }
+                db.query(sqlQuery1,[fname, lname, email, contact] ,(error) => {
+                    try {
+                        if(error) {
+                            db.rollback(() => {
+                                throw error;
+                            })
+                        }
+                        console.log("Insert2 Successfull");
+                    }
+                    catch {
+                        console.log("Insert Unsuccessful");
+                        console.log(error);
+                    }
+                    db.commit((error) => {
+                        if(error) {
+                            db.rollback(() => {
+                                console.log(error);
+                                console.log("Bad Request");
+                            })
+                        }
+                        console.log("Success");
+                        console.log("Successful!");
+                        res.status(200).json("Successfull Transaction");
+                    })
+                })    
+            })
+        })
     });
 })
 
 app.get('/customers/signin', (req, res) => {
-    const email = req.body.CEmail;
-    const password = req.body.password;
+    const password = req.query.password;
+    const email = req.query.email;
+    console.log(password);
     //sqlQuery1 = "SELECT rentit_db.customers.customerID, rentit_db.customers.FirstName, rentit_db.customers.LastName, rentit_db.customers.CEmail, rentit_db.customers.Contact FROM rentit_db.customers, rentit_db.cussignin whererentit_db.customers.CEmail = rentit_db.cussignin.CEmailAND rentit_db.cussignin.CEmail = ? AND rentit_db.cussignin.Hash = ?";
     sqlQuery1 = "SELECT * FROM rentit_db.cussignin WHERE CEmail = ?";
     sqlQuery2 = "SELECT * FROM rentit_db.customers WHERE CEmail = ?";
@@ -138,15 +138,20 @@ app.get('/customers/signin', (req, res) => {
 })
 
 app.get('/customers/searchResults', (req, res) => {
-    const city = req.body.City;
-    sqlQuery = "select * from rentit_db.apartments where rentit_db.apartments.apartmentID NOT IN  (SELECT rentit_db.booking.apartmentID FROM rentit_db.booking WHERE fromDate > sysdate() AND toDate < sysdate()) AND rentit_db.apartments.City = ?";
-    db.query(sqlQuery, [city], (error, Data) => {
+    const city = req.query.City;
+    const startDate = new Date(req.query.startDate);
+    const endDate = new Date(req.query.endDate);
+    sqlQuery = "select * from rentit_db.apartments where rentit_db.apartments.apartmentID NOT IN  (SELECT rentit_db.booking.apartmentID FROM rentit_db.booking WHERE (? >= fromDate AND ? <= toDate) OR (? < fromDate AND ? >= fromDate) OR (? > fromDate AND ? <= toDate)) AND rentit_db.apartments.City = ?";
+    db.query(sqlQuery, [startDate, endDate, startDate, endDate, startDate, startDate, city], (error, Data) => {
         try {
             if(error) {
                 throw error;
             }
             else if(Data.length <= 0) {
-                res.status(200).json("Search returned 0 results:/");
+                res.status(200).json({
+                    statusCode: false,
+                    message: "No apartments as of yet!!"
+                });
             }
             else {
                 res.status(200).json(Data);
@@ -159,6 +164,68 @@ app.get('/customers/searchResults', (req, res) => {
     })
 })
 
+app.get('/customers/apartDetails', (req, res) => {
+    const id = req.query.id;
+    console.log(id);
+    console.log(id);
+    const query = 'select rentit_db.hosts.HostID, FirstName, LastName, Title, rentit_db.details.address, PlaceType, rooms, priceperday, img, img1, img2, img3 from rentit_db.apartments, rentit_db.details, rentit_db.hosts where rentit_db.apartments.apartmentID = rentit_db.details.apartmentID AND rentit_db.apartments.HostID = rentit_db.hosts.HostID AND rentit_db.apartments.apartmentID = ?';
+    db.query(query, [id], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            res.status(200).json(Data);
+        }
+        catch {
+            console.log(error);
+        }
+    })
+})
+
+app.get('/customers/bookedapartments', (req, res) => {
+    const id = req.query.customerID;
+    sqlQuery = "select * from rentit_db.apartments where rentit_db.apartments.apartmentID IN  (SELECT rentit_db.booking.apartmentID FROM rentit_db.booking WHERE fromDate >= sysdate() AND rentit_db.booking.customerID = ?);";
+    db.query(sqlQuery, [id], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            else if(Data.length <= 0) {
+                res.status(200).json({
+                    statusCode: false,
+                    message: "No apartments as of yet!!"
+                });
+            }
+            else {
+                res.status(200).json(Data);
+            }
+        }
+        catch {
+            console.error(error);
+            res.status(400).json("Error in query!!");
+        }
+    })
+})
+
+app.post('/customers/book', (req, res) => {
+    const apartmentID = req.body.apartmentID;
+    const HostID = req.body.HostID;
+    const customerID = req.body.customerID;
+    const start = new Date(req.body.startDate);
+    const end = new Date(req.body.endDate);
+    const query = "INSERT INTO rentit_db.booking (apartmentID, HostID, customerID, fromDate, toDate) VALUE (?, ?, ?, ?, ?)";
+    db.query(query, [apartmentID, HostID, customerID, start, end], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            res.status(200).json("Success");        
+        }
+        catch {
+            console.error(error);
+        }
+    })
+})
 
 app.post('/k', (req, res) => {
     d = new Date();
@@ -184,20 +251,67 @@ app.post('/hosts/signup', (req, res) => {
     const email = req.body.TEmail;
     const contact = req.body.Contact;
     const password = req.body.password;
-    const sqlQuery1 = "INSERT INTO rentit_db.hosts (FirstName, LastName, TEmail, Contact) VALUES (?, ?, ?, ?)";
+    const address = req.body.address;
+    const city = req.body.city;
+    console.log(password);
+    const sqlQuery1 = "INSERT INTO rentit_db.hosts (FirstName, LastName, TEmail, Contact, address, city) VALUES (?, ?, ?, ?, ?, ?)";
     const sqlQuery2 = "INSERT INTO rentit_db.hostsignin (TEmail, Hash) VALUES (?, ?)";
 
     bcrypt.hash(password, saltRounds, function(error, hash) {
         if(error) {
             throw error;
         }
-        signup(sqlQuery1, sqlQuery2, fname, lname, email, contact, hash, res);
+        db.beginTransaction((error) => {
+            if(error) {
+                console.log(error);
+                console.log("Bad Request");
+            }
+            db.query(sqlQuery2,[email, hash] ,(error, Data) => {
+                try {
+                    if(error) {
+                        db.rollback(() => {
+                            throw error;
+                        })
+                    }
+                    console.log("Insert1 Successfull");
+                }
+                catch {
+                    console.log("Insert Unsuccessful");
+                    console.log(error);
+                }
+                db.query(sqlQuery1,[fname, lname, email, contact, address, city] ,(error) => {
+                    try {
+                        if(error) {
+                            db.rollback(() => {
+                                throw error;
+                            })
+                        }
+                        console.log("Insert2 Successfull");
+                    }
+                    catch {
+                        console.log("Insert Unsuccessful");
+                        console.log(error);
+                    }
+                    db.commit((error) => {
+                        if(error) {
+                            db.rollback(() => {
+                                console.log(error);
+                                console.log("Bad Request");
+                            })
+                        }
+                        console.log("Success");
+                        console.log("Successful!");
+                        res.status(200).json("Successfull Transaction");
+                    })
+                })    
+            })
+        })
     });
 })
 
 app.get('/hosts/signin', (req, res) => {
-    const email = req.body.TEmail;
-    const password = req.body.password;
+    const email = req.query.TEmail;
+    const password = req.query.password;
     //sqlQuery1 = "SELECT rentit_db.customers.customerID, rentit_db.customers.FirstName, rentit_db.customers.LastName, rentit_db.customers.CEmail, rentit_db.customers.Contact FROM rentit_db.customers, rentit_db.cussignin whererentit_db.customers.CEmail = rentit_db.cussignin.CEmailAND rentit_db.cussignin.CEmail = ? AND rentit_db.cussignin.Hash = ?";
     sqlQuery1 = "SELECT * FROM rentit_db.hostsignin WHERE TEmail = ?";
     sqlQuery2 = "SELECT * FROM rentit_db.hosts WHERE TEmail = ?";
@@ -271,7 +385,6 @@ app.post('/hosts/apartments', async (req, res) => {
                                             })
                                         }
                                         console.log("Success!!");
-                                        db.end();
                                         res.status(200).json("Successfull Transaction!!");
                                     }
                                     catch {
@@ -311,6 +424,156 @@ app.put('/hosts/price', (req, res) => {
     catch {
         console.error(error);
     }
+})
+
+app.get('/hosts/listapartments', (req, res) => {
+    const id = req.query.HostID;
+    console.log(id);
+    sqlQuery = "select * from rentit_db.apartments where rentit_db.apartments.HostID = ?";
+    db.query(sqlQuery, [id], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            else if(Data.length <= 0) {
+                res.status(200).json({
+                    statusCode: false,
+                    message: "No apartments as of yet!!"
+                });
+            }
+            else {
+                res.status(200).json(Data);
+            }
+        }
+        catch {
+            console.error(error);
+            res.status(400).json("Error in query!!");
+        }
+    })
+})
+
+app.get('/hosts/bookedapartments', (req, res) => {
+    const id = req.query.HostID;
+    console.log(id);
+    sqlQuery = "select * from rentit_db.apartments where rentit_db.apartments.apartmentID IN  (SELECT rentit_db.booking.apartmentID FROM rentit_db.booking WHERE fromDate >= sysdate() AND HostID = ?)";
+    db.query(sqlQuery, [id], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            else if(Data.length <= 0) {
+                res.status(200).json({
+                    statusCode: false,
+                    message: "No bookings as of yet!!"
+                });
+            }
+            else {
+                res.status(200).json(Data);
+            }
+        }
+        catch {
+            console.error(error);
+            res.status(400).json("Error in query!!");
+        }
+    })
+})
+
+
+//Advertiser's APIs
+
+app.post('/advertisers/signup', (req, res) => {
+    const fname = req.body.FirstName;
+    const lname = req.body.LastName;
+    const email = req.body.AEmail;
+    console.log(email);
+    const agency = req.body.AgencyName;
+    const password = req.body.password;
+    console.log(password);
+    const sqlQuery1 = "INSERT INTO rentit_db.advertisers (FirstName, LastName, AEmail, AgencyName) VALUES (?, ?, ?, ?)";
+    const sqlQuery2 = "INSERT INTO rentit_db.advertisersignin (AEmail, Hash) VALUES (?, ?)";
+
+    bcrypt.hash(password, saltRounds, function(error, hash) {
+        if(error) {
+            throw error;
+        }
+        db.beginTransaction((error) => {
+            if(error) {
+                console.log(error);
+                console.log("Bad Request");
+            }
+            db.query(sqlQuery2,[email, hash] ,(error, Data) => {
+                try {
+                    if(error) {
+                        db.rollback(() => {
+                            throw error;
+                        })
+                    }
+                    console.log("Insert1 Successfull");
+                }
+                catch {
+                    console.log("Insert Unsuccessful");
+                    console.log(error);
+                }
+                db.query(sqlQuery1,[fname, lname, email, agency] ,(error) => {
+                    try {
+                        if(error) {
+                            db.rollback(() => {
+                                throw error;
+                            })
+                        }
+                        console.log("Insert2 Successfull");
+                    }
+                    catch {
+                        console.log("Insert Unsuccessful");
+                        console.log(error);
+                    }
+                    db.commit((error) => {
+                        if(error) {
+                            db.rollback(() => {
+                                console.log(error);
+                                console.log("Bad Request");
+                            })
+                        }
+                        console.log("Success");
+                        console.log("Successful!");
+                        res.status(200).json("Successfull Transaction");
+                    })
+                })    
+            })
+        })
+    });
+})
+
+app.get('/advertisers/signin', (req, res) => {
+    const email = req.query.AEmail;
+    const password = req.query.password;
+    console.log(password);
+    sqlQuery1 = "SELECT * FROM rentit_db.advertisersignin WHERE AEmail = ?";
+    sqlQuery2 = "SELECT * FROM rentit_db.advertisers WHERE AEmail = ?";
+    signin(sqlQuery1, sqlQuery2, email, password, res);
+})
+
+app.post('/advertisers/insertAdd', async(req, res) => {
+    const img = req.body.image_info;
+    const title = req.body.Title;
+    const tagLine = req.body.TagLine;
+    const city = req.body.City;
+    const area = req.body.Area;
+    const query = "INSERT INTO rentit_db.advertisements (Title, TagLine, City, Area, image_info) VALUES (?, ?, ?, ?, ?)";
+    response = await cloudinary.uploader.upload(img, {
+        upload_preset: 'rent_it'
+    })
+    db.query(query, [title, tagLine, city, area, response.public_id], (error, data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            res.status(200).json("Success");
+        }
+        catch {
+            console.error(error);
+        }
+    })
 })
 
 // app.post();
