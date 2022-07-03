@@ -33,6 +33,28 @@ app.listen(3001, () => {
 
 const saltRounds = 10;
 
+var soundex = function(str) {
+    let str1 = str.replace(/-/g, '');
+    let str2 = str1.replace(/\s/g, '');
+    let s = str2.replace(/_/g, '');
+    var a = s.toLowerCase().split(''),
+        f = a.shift(),
+        r = '',
+        codes = { a: '', e: '', i: '', o: '', u: '', b: 1, f: 1, p: 1, v: 1, c: 2, g: 2, j: 2, k: 2, q: 2, s: 2, x: 2, z: 2, d: 3, t: 3, l: 4, m: 5, n: 5, r: 6 };
+
+    r = f +
+        a
+        .map(function(v, i, a) {
+            return codes[v]
+        })
+        .filter(function(v, i, a) {
+            return ((i === 0) ? v !== codes[f] : v !== a[i - 1]);
+        })
+        .join('');
+
+    return (r + '000').slice(0, 4).toUpperCase();
+};
+
 function signin (sqlQuery1, sqlQuery2, email, password, res) {
     db.query(sqlQuery1, [email], (error, Data) => {
         try {
@@ -75,56 +97,87 @@ app.post('/customers/signup', (req, res) => {
     const password = req.body.password;
     const sqlQuery1 = "INSERT INTO rentit_db.customers (FirstName, LastName, CEmail, Contact) VALUES (?, ?, ?, ?)";
     const sqlQuery2 = "INSERT INTO rentit_db.cussignin (CEmail, Hash) VALUES (?, ?)";
-    bcrypt.hash(password, saltRounds, function(error, hash) {
-        if(error) {
-            throw error;
-        }
-        db.beginTransaction((error) => {
+    const sqlQuery3 = "SELECT * FROM rentit_db.cussignin WHERE CEmail = ?";
+    try {
+        db.query(sqlQuery3, [email], (error, Data) => {
             if(error) {
-                console.log(error);
-                console.log("Bad Request");
+                throw error;
             }
-            db.query(sqlQuery2,[email, hash] ,(error, Data) => {
-                try {
+            else if(Data.length > 0) {
+                res.status(200).json({
+                    statusCode: false,
+                    message: "Email already exists!!"
+                })
+            }
+            else {
+                bcrypt.hash(password, saltRounds, async function(error, hash) {
                     if(error) {
-                        db.rollback(() => {
-                            throw error;
-                        })
+                        throw error;
                     }
-                    console.log("Insert1 Successfull");
-                }
-                catch {
-                    console.log("Insert Unsuccessful");
-                    console.log(error);
-                }
-                db.query(sqlQuery1,[fname, lname, email, contact] ,(error) => {
                     try {
-                        if(error) {
-                            db.rollback(() => {
-                                throw error;
-                            })
-                        }
-                        console.log("Insert2 Successfull");
-                    }
-                    catch {
-                        console.log("Insert Unsuccessful");
-                        console.log(error);
-                    }
-                    db.commit((error) => {
-                        if(error) {
-                            db.rollback(() => {
+                        db.beginTransaction((error) => {
+                            if(error) {
                                 console.log(error);
                                 console.log("Bad Request");
+                            }
+                            try {
+                                db.query(sqlQuery2,[email, hash] ,(error, Data) => {
+                                    if(error) {
+                                        db.rollback(() => {
+                                            throw error;
+                                        })
+                                    }
+                                    console.log("Insert1 Successfull");     
+                                })}
+                            
+                                catch {
+                                    console.log("Insert Unsuccessful");
+                                    console.log(error);
+                                    res.status(404).json({
+                                        statusCode: false,
+                                        message: "Email already exists!!"
+                                    })
+                                }
+                                db.query(sqlQuery1,[fname, lname, email, contact] ,(error) => {
+                                    try {
+                                        if(error) {
+                                            db.rollback(() => {
+                                                throw error;
+                                            })
+                                        }
+                                        console.log("Insert2 Successfull");
+                                    }
+                                    catch {
+                                        console.log("Insert Unsuccessful");
+                                        console.log(error);
+                                    }
+                                    db.commit((error) => {
+                                        if(error) {
+                                            db.rollback(() => {
+                                                console.log(error);
+                                                console.log("Bad Request");
+                                            })
+                                        }
+                                        console.log("Success");
+                                        console.log("Successful!");
+                                        res.status(200).json({
+                                            statusCode: true,
+                                            message: "Success"
+                                        });
+                                    })
+                                })    
                             })
                         }
-                        console.log("Success");
-                        console.log("Successful!");
-                        res.status(200).json("Successfull Transaction");
+                        catch {
+                            console.error(error);
+                        }
                     })
-                })    
+                }
             })
-        })
-    });
+        }
+    catch {
+        console.error(error);
+    }     
 })
 
 app.get('/customers/signin', (req, res) => {
@@ -166,9 +219,7 @@ app.get('/customers/searchResults', (req, res) => {
 
 app.get('/customers/apartDetails', (req, res) => {
     const id = req.query.id;
-    console.log(id);
-    console.log(id);
-    const query = 'select rentit_db.hosts.HostID, FirstName, LastName, Title, rentit_db.details.address, PlaceType, rooms, priceperday, img, img1, img2, img3 from rentit_db.apartments, rentit_db.details, rentit_db.hosts where rentit_db.apartments.apartmentID = rentit_db.details.apartmentID AND rentit_db.apartments.HostID = rentit_db.hosts.HostID AND rentit_db.apartments.apartmentID = ?';
+    const query = 'select rentit_db.apartments.City, rentit_db.hosts.HostID, FirstName, LastName, Title, rentit_db.details.address, PlaceType, rooms, priceperday, img, img1, img2, img3 from rentit_db.apartments, rentit_db.details, rentit_db.hosts where rentit_db.apartments.apartmentID = rentit_db.details.apartmentID AND rentit_db.apartments.HostID = rentit_db.hosts.HostID AND rentit_db.apartments.apartmentID = ?';
     db.query(query, [id], (error, Data) => {
         try {
             if(error) {
@@ -227,6 +278,25 @@ app.post('/customers/book', (req, res) => {
     })
 })
 
+app.get('/customers/bookingInfo', (req, res) => {
+    apartmentID = req.query.apartmentID;
+    customerID = req.query.customerID;
+    console.log(apartmentID);
+    console.log(customerID);
+    query = 'SELECT * from rentit_db.booking where apartmentID = ? AND customerID = ? AND fromDate >= sysdate()';
+    try {
+        db.query(query, [apartmentID, customerID], (error, Data) => {
+            if(error) {
+                throw error;
+            }
+            res.status(200).json(Data);
+        })
+    }
+    catch {
+        console.error(error);
+    }
+})
+
 app.post('/k', (req, res) => {
     d = new Date();
     sqlQ = "insert into rentit_db.tareekh values (?)";
@@ -256,57 +326,83 @@ app.post('/hosts/signup', (req, res) => {
     console.log(password);
     const sqlQuery1 = "INSERT INTO rentit_db.hosts (FirstName, LastName, TEmail, Contact, address, city) VALUES (?, ?, ?, ?, ?, ?)";
     const sqlQuery2 = "INSERT INTO rentit_db.hostsignin (TEmail, Hash) VALUES (?, ?)";
+    const sqlQuery3 = "SELECT * FROM rentit_db.hostsignin WHERE TEmail = ?";
 
-    bcrypt.hash(password, saltRounds, function(error, hash) {
-        if(error) {
-            throw error;
-        }
-        db.beginTransaction((error) => {
+    try {
+        db.query(sqlQuery3, [email], (error, Data) => {
             if(error) {
-                console.log(error);
-                console.log("Bad Request");
+                throw error;
             }
-            db.query(sqlQuery2,[email, hash] ,(error, Data) => {
-                try {
+            else if(Data.length > 0) {
+                res.status(200).json({
+                    statusCode: false,
+                    message: "Email already exists!!"
+                })
+            }
+            else {
+                bcrypt.hash(password, saltRounds, function(error, hash) {
                     if(error) {
-                        db.rollback(() => {
-                            throw error;
+                        throw error;
+                    }
+                    db.beginTransaction((error) => {
+                        if(error) {
+                            console.log(error);
+                            console.log("Bad Request");
+                        }
+                        db.query(sqlQuery2,[email, hash] ,(error, Data) => {
+                            try {
+                                if(error) {
+                                    db.rollback(() => {
+                                        throw error;
+                                    })
+                                }
+                                console.log("Insert1 Successfull");
+                            }
+                            catch {
+                                if(error.errno == 1062) {
+                                    res.status(404).json({
+                                        statusCode: false,
+                                        message: "Email already exists!!"
+                                    })
+                                }
+                            }
+                            db.query(sqlQuery1,[fname, lname, email, contact, address, city] ,(error) => {
+                                try {
+                                    if(error) {
+                                        db.rollback(() => {
+                                            throw error;
+                                        })
+                                    }
+                                    console.log("Insert2 Successfull");
+                                }
+                                catch {
+                                    console.log("Insert Unsuccessful");
+                                    console.log(error);
+                                }
+                                db.commit((error) => {
+                                    if(error) {
+                                        db.rollback(() => {
+                                            console.log(error);
+                                            console.log("Bad Request");
+                                        })
+                                    }
+                                    console.log("Success");
+                                    console.log("Successful!");
+                                    res.status(200).json({
+                                        statusCode: true,
+                                        message: "Success"
+                                    });
+                                })
+                            })    
                         })
-                    }
-                    console.log("Insert1 Successfull");
-                }
-                catch {
-                    console.log("Insert Unsuccessful");
-                    console.log(error);
-                }
-                db.query(sqlQuery1,[fname, lname, email, contact, address, city] ,(error) => {
-                    try {
-                        if(error) {
-                            db.rollback(() => {
-                                throw error;
-                            })
-                        }
-                        console.log("Insert2 Successfull");
-                    }
-                    catch {
-                        console.log("Insert Unsuccessful");
-                        console.log(error);
-                    }
-                    db.commit((error) => {
-                        if(error) {
-                            db.rollback(() => {
-                                console.log(error);
-                                console.log("Bad Request");
-                            })
-                        }
-                        console.log("Success");
-                        console.log("Successful!");
-                        res.status(200).json("Successfull Transaction");
                     })
-                })    
-            })
+                });
+            }
         })
-    });
+    }
+    catch {
+        console.error(error);
+    }
 })
 
 app.get('/hosts/signin', (req, res) => {
@@ -491,57 +587,76 @@ app.post('/advertisers/signup', (req, res) => {
     console.log(password);
     const sqlQuery1 = "INSERT INTO rentit_db.advertisers (FirstName, LastName, AEmail, AgencyName) VALUES (?, ?, ?, ?)";
     const sqlQuery2 = "INSERT INTO rentit_db.advertisersignin (AEmail, Hash) VALUES (?, ?)";
+    const sqlQuery3 = "SELECT * FROM rentit_db.advertisersignin WHERE AEmail = ?";
 
-    bcrypt.hash(password, saltRounds, function(error, hash) {
-        if(error) {
-            throw error;
-        }
-        db.beginTransaction((error) => {
+    try {
+        db.query(sqlQuery3, [email], (error, Data) => {
             if(error) {
-                console.log(error);
-                console.log("Bad Request");
+                throw error;
             }
-            db.query(sqlQuery2,[email, hash] ,(error, Data) => {
-                try {
+            else if(Data.length > 0) {
+                res.status(200).json({
+                    statusCode: false,
+                    message: "Email already exists!!"
+                })
+            }
+            else {
+                bcrypt.hash(password, saltRounds, function(error, hash) {
                     if(error) {
-                        db.rollback(() => {
-                            throw error;
-                        })
+                        throw error;
                     }
-                    console.log("Insert1 Successfull");
-                }
-                catch {
-                    console.log("Insert Unsuccessful");
-                    console.log(error);
-                }
-                db.query(sqlQuery1,[fname, lname, email, agency] ,(error) => {
-                    try {
+                    db.beginTransaction((error) => {
                         if(error) {
-                            db.rollback(() => {
-                                throw error;
-                            })
+                            console.log(error);
+                            console.log("Bad Request");
                         }
-                        console.log("Insert2 Successfull");
-                    }
-                    catch {
-                        console.log("Insert Unsuccessful");
-                        console.log(error);
-                    }
-                    db.commit((error) => {
-                        if(error) {
-                            db.rollback(() => {
+                        db.query(sqlQuery2,[email, hash] ,(error, Data) => {
+                            try {
+                                if(error) {
+                                    db.rollback(() => {
+                                        throw error;
+                                    })
+                                }
+                                console.log("Insert1 Successfull");
+                            }
+                            catch {
+                                console.log("Insert Unsuccessful");
                                 console.log(error);
-                                console.log("Bad Request");
-                            })
-                        }
-                        console.log("Success");
-                        console.log("Successful!");
-                        res.status(200).json("Successfull Transaction");
+                            }
+                            db.query(sqlQuery1,[fname, lname, email, agency] ,(error) => {
+                                try {
+                                    if(error) {
+                                        db.rollback(() => {
+                                            throw error;
+                                        })
+                                    }
+                                    console.log("Insert2 Successfull");
+                                }
+                                catch {
+                                    console.log("Insert Unsuccessful");
+                                    console.log(error);
+                                }
+                                db.commit((error) => {
+                                    if(error) {
+                                        db.rollback(() => {
+                                            console.log(error);
+                                            console.log("Bad Request");
+                                        })
+                                    }
+                                    console.log("Success");
+                                    console.log("Successful!");
+                                    res.status(200).json("Successfull Transaction");
+                                })
+                            })    
+                        })
                     })
-                })    
-            })
+                });
+            }
         })
-    });
+    }
+    catch {
+        console.error(error);
+    }
 })
 
 app.get('/advertisers/signin', (req, res) => {
@@ -559,16 +674,139 @@ app.post('/advertisers/insertAdd', async(req, res) => {
     const tagLine = req.body.TagLine;
     const city = req.body.City;
     const area = req.body.Area;
-    const query = "INSERT INTO rentit_db.advertisements (Title, TagLine, City, Area, image_info) VALUES (?, ?, ?, ?, ?)";
+    const id = req.body.advertiserID;
+    const sound = soundex(area);
+    const query = "INSERT INTO rentit_db.advertisements (Title, TagLine, City, Area, image_info, advertiserID, soundex) VALUES (?, ?, ?, ?, ?, ?, ?)";
     response = await cloudinary.uploader.upload(img, {
         upload_preset: 'rent_it'
     })
-    db.query(query, [title, tagLine, city, area, response.public_id], (error, data) => {
-        try {
+    try {
+        db.query(query, [title, tagLine, city, area, response.public_id, id, sound], (error, data) => {
             if(error) {
                 throw error;
             }
             res.status(200).json("Success");
+        
+        })
+    }
+    catch {
+        console.error(error);
+    }
+})
+
+app.get('/advertisers/citySearch', (req, res) => {
+    const city = req.query.City;
+    console.log(city);
+    query1 = "SELECT * FROM rentit_db.advertisements WHERE City = ?";
+    db.query(query1, [city], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            else if(Data.length > 0) { 
+                res.status(200).json(Data);
+            }
+            else {
+                query2 = "SELECT * FROM rentit_db.advertisements";
+                db.query(query2, (error, Data) => {
+                    try {
+                        if(error) {
+                            throw error;
+                        }
+                        res.status(200).json(Data);
+                    }
+                    catch {
+                        console.error(error);
+                    }
+                })
+            }
+        }
+        catch {
+            console.error(error);
+        }
+    })
+})
+
+app.get('/advertisers/areaSearch', (req, res) => {
+    const city = req.query.City;
+    const area = req.query.Area;
+    sound = soundex(area);
+    console.log(sound);
+    query1 = "SELECT * FROM rentit_db.advertisements WHERE soundex = ?;"
+    db.query(query1, [sound], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            else if(Data.length > 0) { 
+                res.status(200).json(Data);
+            }
+            else {
+                query2 = "SELECT * FROM rentit_db.advertisements WHERE City = ?";
+                db.query(query2, [city], (error, Data) => {
+                    try {
+                        if(error) {
+                            throw error;
+                        }
+                        else if(Data.length > 0) {
+                            res.status(200).json(Data);
+                        }
+                        else {
+                            query3 = "SELECT * FROM rentit_db.advertisements";
+                            db.query(query3, (error, Data) => {
+                                try {
+                                    if(error) {
+                                        throw error;
+                                    }
+                                    res.status(200).json(Data);
+                                }
+                                catch {
+                                    console.error(error);
+                                }
+                            })
+                        }
+                    }
+                    catch {
+                        console.error(error);
+                    }
+                })
+            }
+        }
+        catch {
+            console.error(error);
+        }
+    })
+})
+
+app.get('/advertisers/cityAreaSearch', (req, res) => {
+    const city = req.query.City;
+    const area = req.query.Area;
+    const sound = soundex(area);
+    console.log(sound);
+    console.log(city);
+    query1 = "SELECT * FROM rentit_db.advertisements WHERE City = ? || soundex = ?";
+    db.query(query1, [city, sound], (error, Data) => {
+        try {
+            if(error) {
+                throw error;
+            }
+            else if(Data.length > 0) { 
+                res.status(200).json(Data);
+            }
+            else {
+                query2 = "SELECT * FROM rentit_db.advertisements";
+                db.query(query2, (error, Data) => {
+                    try {
+                        if(error) {
+                            throw error;
+                        }
+                        res.status(200).json(Data);
+                    }
+                    catch {
+                        console.error(error);
+                    }
+                })
+            }
         }
         catch {
             console.error(error);
